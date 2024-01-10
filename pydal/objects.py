@@ -1609,12 +1609,30 @@ class Expression(object):
     def __ge__(self, value):
         return Query(self.db, self._dialect.gte, self, value)
 
-    def like(self, value, case_sensitive=True, escape=None):
+    def like(self, value, case_sensitive=True, escape=None, all=True):
         op = case_sensitive and self._dialect.like or self._dialect.ilike
+        if isinstance(value, (list, tuple)):
+            subqueries = [
+                self.like(str(v), case_sensitive=case_sensitive, escape=escape)
+                for v in value
+                if str(v)
+            ]
+            if not subqueries:
+                return self.like("")
+            else:
+                return reduce(all and AND or OR, subqueries)
+        if self.type not in (
+            "string",
+            "text",
+            "json",
+            "jsonb",
+            "upload",
+        ) and not self.type.startswith("list:"):
+            raise SyntaxError("like used with incompatible field type")
         return Query(self.db, op, self, value, escape=escape)
 
-    def ilike(self, value, escape=None):
-        return self.like(value, case_sensitive=False, escape=escape)
+    def ilike(self, value, escape=None, all=True):
+        return self.like(value, case_sensitive=False, escape=escape, all=all)
 
     def regexp(self, value, match_parameter=None):
         return Query(

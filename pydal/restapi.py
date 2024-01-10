@@ -305,6 +305,8 @@ class RestAPI(object):
                 value.split(",") if isinstance(value, str) else list(value)
             ),
             "contains": lambda: field.contains(value),
+            "like": lambda: field.like(value),
+            "ilike": lambda: field.ilike(value),
         }
         return expression[condition]()
 

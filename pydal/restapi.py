@@ -398,6 +398,8 @@ class RestAPI(object):
                     "startswith",
                     "contains",
                     "in",
+                    "ilike",
+                    "like"
                 ):
                     key_parts.append("eq")
                 is_negated = key_parts[0] == "not"

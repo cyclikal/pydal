@@ -9,6 +9,7 @@
     :license: BSD, see LICENSE for more details.
 """
 
+import datetime
 import re
 import warnings
 
@@ -18,6 +19,11 @@ class RemovedInNextVersionWarning(DeprecationWarning):
 
 
 warnings.simplefilter("always", RemovedInNextVersionWarning)
+
+
+def utcnow():
+    """returns the current time in utc"""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def warn_of_deprecation(old_name, new_name, prefix=None, stack=2):

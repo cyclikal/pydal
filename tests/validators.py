@@ -422,7 +422,7 @@ class TestValidators(unittest.TestCase):
         db = DAL("sqlite:memory")
         db.define_table("person", Field("name"), Field("nickname"))
         db.person.insert(name="george")
-        db.person.insert(name="costanza", nickname="T Bone")
+        costanza_id = db.person.insert(name="costanza", nickname="T Bone")
         rtn = IS_NOT_IN_DB(db, "person.name", error_message="oops")("george")
         self.assertEqual(rtn, ("george", "oops"))
         rtn = IS_NOT_IN_DB(
@@ -440,7 +440,7 @@ class TestValidators(unittest.TestCase):
         rtn = IS_NOT_IN_DB(db, db.person, error_message="oops")(1)
         self.assertEqual(rtn, (1, "oops"))
         vldtr = IS_NOT_IN_DB(db, "person.name", error_message="oops")
-        vldtr.set_self_id({"name": "costanza", "nickname": "T Bone"})
+        vldtr.set_self_id(costanza_id)
         rtn = vldtr("george")
         self.assertEqual(rtn, ("george", "oops"))
         rtn = vldtr("costanza")
@@ -687,18 +687,22 @@ class TestValidators(unittest.TestCase):
     def test_IS_LIST_OF_EMAILS(self):
         emails = ["localguy@localhost", "_Yosemite.Sam@example.com"]
         rtn = IS_LIST_OF_EMAILS()(",".join(emails))
-        self.assertEqual(rtn, (",".join(emails), None))
+        self.assertEqual(rtn, (emails, None))
         rtn = IS_LIST_OF_EMAILS()(";".join(emails))
-        self.assertEqual(rtn, (";".join(emails), None))
+        self.assertEqual(rtn, (emails, None))
         rtn = IS_LIST_OF_EMAILS()(" ".join(emails))
-        self.assertEqual(rtn, (" ".join(emails), None))
+        self.assertEqual(rtn, (emails, None))
         emails.append("a")
         rtn = IS_LIST_OF_EMAILS()(";".join(emails))
         self.assertEqual(
             rtn, ("localguy@localhost;_Yosemite.Sam@example.com;a", "Invalid emails: a")
         )
+        rtn = IS_LIST_OF_EMAILS()("")
+        self.assertEqual(
+            rtn, ([], None)
+        )
         rtn = IS_LIST_OF_EMAILS().formatter(["test@example.com", "dude@example.com"])
-        self.assertEqual(rtn, "test@example.com, dude@example.com")
+        self.assertEqual(rtn, "test@example.com; dude@example.com")
 
     def test_IS_URL(self):
         rtn = IS_URL()("http://example.com")

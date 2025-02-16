@@ -7,7 +7,7 @@ from .regex import REGEX_SEARCH_PATTERN, REGEX_SQUARE_BRACKETS
 def to_num(num):
     result = 0
     try:
-        result = long(num)
+        result = int(num)
     except NameError as e:
         result = int(num)
     return result
@@ -302,9 +302,11 @@ class RestParser(object):
                         ).split("|")
                     try:
                         orderby = [
-                            self.db[table][f]
-                            if not f.startswith("~")
-                            else ~self.db[table][f[1:]]
+                            (
+                                self.db[table][f]
+                                if not f.startswith("~")
+                                else ~self.db[table][f[1:]]
+                            )
                             for f in ofields
                         ]
                     except (KeyError, AttributeError):

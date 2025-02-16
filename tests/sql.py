@@ -314,7 +314,7 @@ class TestFields(DALtest):
             None,
             11,
             14.3,
-            long(11),
+            int(11),
         ]
         for obj in objs:
             rtn_id = db.tt.insert(aa=obj)
@@ -785,6 +785,7 @@ class TestSubselect(DALtest):
         self.assertIsInstance(sub.on(sub.aa != None), Expression)
 
     @skipIf(PY2, "sqlite3 on py2 does not allow circular references")
+    @unittest.skipIf(IS_MSSQL, "Skip mssql")
     def testCTE(self):
         db = self.connect()
         db.define_table("org", Field("name"), Field("boss", "reference org"))

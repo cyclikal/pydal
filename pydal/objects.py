@@ -3,7 +3,6 @@
 
 import base64
 import binascii
-import cgi
 import copy
 import csv
 import datetime
@@ -37,7 +36,6 @@ from ._compat import (
     to_unicode,
     xrange,
 )
-from ._gae import Key
 from ._globals import AND, DEFAULT, IDENTITY, OR
 from .exceptions import NotAuthorizedException, NotFoundException
 from .helpers.classes import (
@@ -109,7 +107,6 @@ def csv_reader(utf8_data, dialect=csv.excel, encoding="utf-8", **kwargs):
 
 
 class Row(BasicStorage):
-
     """
     A dictionary that lets you do d['a'] as well as d.a
     this is only used to store a `Row`
@@ -155,7 +152,7 @@ class Row(BasicStorage):
         return self.get("id")
 
     def __long__(self):
-        return long(int(self))
+        return int(int(self))
 
     def __hash__(self):
         return id(self)
@@ -202,7 +199,7 @@ class Row(BasicStorage):
             elif isinstance(v, Row):
                 d[k] = v.as_dict()
             elif isinstance(v, Reference):
-                d[k] = long(v)
+                d[k] = int(v)
             elif isinstance(v, decimal.Decimal):
                 d[k] = float(v)
             elif isinstance(v, DT_INST):
@@ -264,7 +261,6 @@ copyreg.pickle(Row, pickle_row)
 
 
 class Table(Serializable, BasicStorage):
-
     """
     Represents a database table
 
@@ -628,6 +624,28 @@ class Table(Serializable, BasicStorage):
                 else:
                     self._referenced_by.append(referee)
 
+                field_type = referee.type
+                is_list = field_type[:15] == "list:reference "
+                if is_list:
+                    ref = field_type[15:].strip()
+                else:
+                    ref = field_type[10:].strip()
+
+                if "." in ref:
+                    _, throw_it, myfieldname = ref.partition(".")
+                    if not hasattr(self, "_primarykey"):
+                        raise SyntaxError(
+                            "keyed tables can only reference other keyed tables (for now)"
+                        )
+                    if myfieldname not in self.fields:
+                        raise SyntaxError(
+                            "invalid field '%s' for referenced table '%s'"
+                            " in table '%s'" % (myfieldname, self.name, referee.table.name)
+                        )
+                    referee.referent = self[myfieldname]
+                else:
+                    referee.referent = self._id
+
     def _filter_fields(self, record, allow_id=False, writable_only=False):
         return dict(
             [
@@ -659,7 +677,7 @@ class Table(Serializable, BasicStorage):
         return query
 
     def __getitem__(self, key):
-        if str(key).isdigit() or (Key is not None and isinstance(key, Key)):
+        if str(key).isdigit():
             # non negative key or gae
             return (
                 self._db(self._id == str(key))
@@ -1127,7 +1145,7 @@ class Table(Serializable, BasicStorage):
                 if not value.strip():
                     value = None
                 else:
-                    value = long(value)
+                    value = int(value)
             elif field.type.startswith("list:string"):
                 value = bar_decode_string(value)
             elif field.type.startswith(list_reference_s):
@@ -1147,7 +1165,7 @@ class Table(Serializable, BasicStorage):
                     pass
             elif id_offset and field.type.startswith("reference"):
                 try:
-                    value = id_offset[field.type[9:].strip()] + long(value)
+                    value = id_offset[field.type[9:].strip()] + int(value)
                 except KeyError:
                     pass
             return value
@@ -1191,7 +1209,7 @@ class Table(Serializable, BasicStorage):
                             if field.type != "id":
                                 ditems[fieldname] = value
                             else:
-                                csv_id = long(value)
+                                csv_id = int(value)
                         except ValueError:
                             raise RuntimeError("Unable to parse line:%s" % (lineno + 1))
                 if not (id_map or csv_id is None or id_offset is None or unique_idx):
@@ -1487,12 +1505,23 @@ class Expression(object):
         new_cls = super(Expression, cls).__new__(cls)
         return new_cls
 
-    def __init__(self, db, op, first=None, second=None, type=None, **optional_args):
+    def __init__(
+        self,
+        db,
+        op,
+        first=None,
+        second=None,
+        type=None,
+        tablename=None,
+        **optional_args,
+    ):
         self.db = db
         self.op = op
         self.first = first
         self.second = second
         self._table = getattr(first, "_table", None)
+        # this used to place an expression with alias inside a table
+        self.tablename = tablename
         if not type and first and hasattr(first, "type"):
             self.type = first.type
         else:
@@ -1596,6 +1625,11 @@ class Expression(object):
             return self[i : i + 1]
 
     def __str__(self):
+        if self.op == self._dialect._as:
+            return self.second
+        return str(self.db._adapter.expand(self, self.type))
+
+    def __repr__(self):
         return str(self.db._adapter.expand(self, self.type))
 
     def __or__(self, other):  # for use in sortby
@@ -1755,12 +1789,11 @@ class Expression(object):
         )
 
     def with_alias(self, alias):
-        return Expression(self.db, self._dialect._as, self, alias, self.type)
-
-    @property
-    def alias(self):
-        if self.op == self._dialect._as:
-            return self.second
+        if "." in alias:
+            tablename, alias = alias.split(".", 1)
+        else:
+            tablename = None
+        return Expression(self.db, self._dialect._as, self, alias, self.type, tablename)
 
     # GIS expressions
 
@@ -2161,7 +2194,7 @@ class Field(Expression, Serializable):
         filename = "{}".format(filename)
         if self.custom_store:
             return self.custom_store(file, filename, path)
-        if isinstance(file, cgi.FieldStorage):
+        if hasattr(file, "file") and hasattr(file, "filename"):
             filename = filename or file.filename
             file = file.file
         elif not filename:
@@ -2419,7 +2452,6 @@ class Field(Expression, Serializable):
 
 
 class Query(Serializable):
-
     """
     Necessary to define a set.
     It can be stored or can be passed to `DAL.__call__()` to obtain a `Set`
@@ -2555,7 +2587,6 @@ class Query(Serializable):
 
 
 class Set(Serializable):
-
     """
     Represents a set of records in the database.
     Records are identified by the `query=Query(...)` object.
@@ -2758,11 +2789,11 @@ class Set(Serializable):
                 time_expire = cache["expiration"]
                 key = cache.get("key")
                 if not key:
-                    key = db._uri + "/" + sql
+                    key = f"{db._uri}/sql"
                     key = hashlib_md5(key).hexdigest()
             else:
                 cache_model, time_expire = cache
-                key = db._uri + "/" + sql
+                key = f"{db._uri}/sql"
                 key = hashlib_md5(key).hexdigest()
             return cache_model(
                 key,
@@ -3018,7 +3049,7 @@ class BasicRows(object):
             row[children_name] = []
         for row in rows:
             parent = row[parent_name]
-            if parent is None:
+            if parent not in drows:
                 roots.append(row)
             else:
                 drows[parent][children_name].append(row)
@@ -3220,7 +3251,7 @@ class BasicRows(object):
             elif PY2 and isinstance(value, unicode):
                 return value.encode("utf8")
             elif isinstance(value, Reference):
-                return long(value)
+                return int(value)
             elif hasattr(value, "isoformat"):
                 return value.isoformat()[:19].replace("T", " ")
             elif isinstance(value, (list, tuple)):  # for type='list:..'
@@ -3383,10 +3414,16 @@ class Rows(BasicRows):
         )
 
     def __getitem__(self, i):
+        """
+        This extract a row from a set of rows and tries to compactify
+        - if there are columns from more than one table, it returns a dict of dicts
+        - if there are columns for a single table it returns a single dict
+        - if there are extra columns (including aliased) and a single table, adds the extra columns to the one table
+        """
         if isinstance(i, slice):
             return self.__getslice__(i.start, i.stop)
         row = self.records[i]
-        keys = list(row.keys())
+        keys = list(row)
         if self.compact and len(keys) == 1 and keys[0] != "_extra":
             return row[keys[0]]
         return row
@@ -3628,7 +3665,7 @@ class Rows(BasicRows):
                                representer in DAL instance"
             )
         row = copy.deepcopy(self.records[i])
-        keys = list(row.keys())
+        keys = list(row)
         if not fields:
             fields = [f for f in self.fields if isinstance(f, Field) and f.represent]
         for field in fields:
@@ -3700,7 +3737,7 @@ class IterRows(BasicRows):
             # in
             # <Row {'id': 1L, 'name': 'web2py'}>
             # normally accomplished by Rows.__get_item__
-            keys = list(row.keys())
+            keys = list(row)
             if len(keys) == 1 and keys[0] != "_extra":
                 row = row[keys[0]]
         return row

@@ -189,19 +189,19 @@ class Serializable(object):
         return serializers.yaml(self.as_dict(flat=True, sanitize=sanitize))
 
 
-class Reference(long):
+class Reference(int):
     def __allocate(self):
         if not self._record:
-            self._record = self._table[long(self)]
+            self._record = self._table[int(self)]
         if not self._record:
             raise RuntimeError(
                 "Using a recursive select but encountered a broken "
-                + "reference: %s %d" % (self._table, long(self))
+                + "reference: %s %d" % (self._table, int(self))
             )
 
     def __getattr__(self, key, default=None):
         if key == "id":
-            return long(self)
+            return int(self)
         if key in self._table:
             self.__allocate()
         if self._record:
@@ -222,7 +222,7 @@ class Reference(long):
 
     def __getitem__(self, key):
         if key == "id":
-            return long(self)
+            return int(self)
         self.__allocate()
         return self._record.get(key, None)
 
@@ -237,9 +237,9 @@ def Reference_unpickler(data):
 
 def Reference_pickler(data):
     try:
-        marshal_dump = marshal.dumps(long(data))
+        marshal_dump = marshal.dumps(int(data))
     except AttributeError:
-        marshal_dump = "i%s" % struct.pack("<i", long(data))
+        marshal_dump = "i%s" % struct.pack("<i", int(data))
     return (Reference_unpickler, (marshal_dump,))
 
 

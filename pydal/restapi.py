@@ -1,10 +1,11 @@
 import collections
 import copy
-import datetime
 import fnmatch
 import functools
 import re
 import traceback
+
+from .utils import utcnow
 
 __version__ = "0.1"
 
@@ -26,7 +27,16 @@ class NotFound(ValueError):
 
 
 def maybe_call(value):
+    "call value if callable else return value"
     return value() if callable(value) else value
+
+
+def trydo(f, default):
+    "return f() if no exception else return default"
+    try:
+        return f()
+    except Exception:
+        return default
 
 
 def error_wrapper(func):
@@ -58,7 +68,7 @@ def error_wrapper(func):
             data["message"] = str(e)
             data["code"] = 400
         finally:
-            data["timestamp"] = datetime.datetime.utcnow().isoformat()
+            data["timestamp"] = utcnow().isoformat()
             data["api_version"] = __version__
         return data
 
@@ -367,9 +377,11 @@ class RestAPI(object):
             elif key == "@limit":
                 limit = min(
                     int(value),
-                    self.policy.get(tname, "GET", "limit")
-                    if self.policy
-                    else MAX_LIMIT,
+                    (
+                        self.policy.get(tname, "GET", "limit")
+                        if self.policy
+                        else MAX_LIMIT
+                    ),
                 )
             elif key == "@order":
                 orderby = [
@@ -577,12 +589,14 @@ class RestAPI(object):
         if not options_list:
             response["items"] = rows.as_list()
         else:
-            if table._format:
-                response["items"] = [
-                    dict(value=row.id, text=(table._format % row)) for row in rows
-                ]
+            if callable(table._format):
+                f = lambda row: trydo(lambda: table._format(row), str(row.id))
+            elif table._format:
+                f = lambda row: trydo(lambda: table._format % row, str(row.id))
             else:
-                response["items"] = [dict(value=row.id, text=row.id) for row in rows]
+                f = lambda row: str(row.id)
+            response["items"] = [dict(value=row.id, text=f(row)) for row in rows]
+
         if do_count or (self.allow_count == "legacy" and offset == 0):
             response["count"] = db(query).count()
         if model:

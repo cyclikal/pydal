@@ -12,7 +12,6 @@ Validators
 -----------
 """
 import binascii
-import cgi
 import datetime
 import decimal
 import encodings.idna
@@ -375,7 +374,7 @@ class IS_LENGTH(Validator):
             value = value.encode("utf8")
         elif isinstance(value, (bytes, bytearray, tuple, list)):
             length = len(value)
-        elif isinstance(value, cgi.FieldStorage):
+        elif hasattr(value, "file") and hasattr(value, "filename"):
             if value.file:
                 value.file.seek(0, os.SEEK_END)
                 length = value.file.tell()
@@ -723,7 +722,7 @@ class IS_IN_DB(Validator):
                 def count(values, s=self.dbset, f=field):
                     return s(f.belongs(list(map(int, values)))).count()
 
-                if self.dbset.db._adapter.dbengine == "google:datastore":
+                if self.dbset.db._adapter.dbengine == "firestore":
                     range_ids = range(0, len(values), 30)
                     total = sum(count(values[i : i + 30]) for i in range_ids)
                     if total == len(values):
@@ -779,11 +778,7 @@ class IS_NOT_IN_DB(Validator):
     ):
         if isinstance(field, Table):
             field = field._id
-
-        if hasattr(dbset, "define_table"):
-            self.dbset = dbset()
-        else:
-            self.dbset = dbset
+        self.dbset = dbset
         self.field = field
         self.error_message = error_message
         self.record_id = 0
@@ -802,18 +797,22 @@ class IS_NOT_IN_DB(Validator):
         if value in self.allowed_override:
             return value
         (tablename, fieldname) = str(self.field).split(".")
-        table = self.dbset.db[tablename]
+        if hasattr(self.dbset, "define_table"):
+            db = self.dbset
+        else:
+            db = self.dbset.db
+        table = db[tablename]
         field = table[fieldname]
-        query = field == value
+        dbset = self.dbset(
+            field == value, ignore_common_filters=self.ignore_common_filters
+        )
 
         # make sure exclude the record_id
         id = record_id or self.record_id
         if isinstance(id, dict):
             id = table(**id)
-        if not id is None:
-            query &= table._id != id
-        subset = self.dbset(query, ignore_common_filters=self.ignore_common_filters)
-        if subset.select(limitby=(0, 1)):
+        record = dbset.select(table._id, limitby=(0, 1)).first()
+        if record and record[table._id.name] != id:
             raise ValidationError(self.translator(self.error_message))
         return value
 
@@ -1175,7 +1174,6 @@ class IS_ALPHANUMERIC(IS_MATCH):
 
 
 class IS_EMAIL(Validator):
-
     """
     Checks if field's value is a valid email address. Can be set to disallow
     or force addresses from certain domain(s).
@@ -1357,18 +1355,26 @@ class IS_LIST_OF_EMAILS(Validator):
     def validate(self, value, record_id=None):
         bad_emails = []
         f = IS_EMAIL()
-        for email in re.findall(self.REGEX_NOT_EMAIL_SPLITTER, value):
+        if isinstance(value, str):
+            emails = re.findall(self.REGEX_NOT_EMAIL_SPLITTER, value)
+        else:
+            emails = value
+        for email in emails:
             error = f(email)[1]
             if error and email not in bad_emails:
                 bad_emails.append(email)
         if bad_emails:
             raise ValidationError(
-                self.translator(self.error_message) % ", ".join(bad_emails)
+                self.translator(self.error_message) % ";".join(bad_emails)
             )
-        return value
+        return emails
 
     def formatter(self, value, row=None):
-        return ", ".join(value or [])
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            value = re.findall(self.REGEX_NOT_EMAIL_SPLITTER, value)
+        return "; ".join(value)
 
 
 # URL scheme source:
